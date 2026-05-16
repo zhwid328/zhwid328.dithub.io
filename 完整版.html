@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, touch-action=manipulation">
+    <title>植物细胞探索 · 从树叶开始</title>
+    <style>
+        :root {
+            --bg: #0a0f0a;
+            --text: #e0e8d8;
+            --accent: #7cb342;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: var(--bg);
+            overflow: hidden;
+            font-family: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            height: 100vh; width: 100vw;
+        }
+        #canvas-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        canvas { display: block; }
+
+        #hint-bar {
+            position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+            z-index: 10; background: rgba(10,20,10,0.8); backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(120,180,100,0.35);
+            border-radius: 50px; padding: 12px 28px; color: #c8dcc0; font-size: 15px;
+            letter-spacing: 0.6px; pointer-events: none; transition: all 0.5s cubic-bezier(0.4,0,0.2,1);
+            text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+        #hint-bar .icon { display: inline-block; margin-right: 6px; font-size: 18px; }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div id="hint-bar"><span class="icon">🍃</span> 点击树叶开始探索</div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // ---------- 场景初始化 ----------
+        const container = document.getElementById('canvas-container');
+        const hintBar = document.getElementById('hint-bar');
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color('#0d1a0d');
+        scene.fog = new THREE.Fog('#0d1a0d', 8, 40);
+
+        const perspCamera = new THREE.PerspectiveCamera(50, container.clientWidth/container.clientHeight, 0.1, 60);
+        perspCamera.position.set(0, 0.8, 7);
+        const orthoCamera = new THREE.OrthographicCamera(-6, 6, 4.5, -4.5, 0.1, 20);
+        orthoCamera.position.set(0, 0, 8);
+        let activeCamera = perspCamera;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        container.appendChild(renderer.domElement);
+
+        // 光照
+        scene.add(new THREE.AmbientLight('#b8d4b8', 0.9));
+        const sunLight = new THREE.DirectionalLight('#fffef0', 4.5);
+        sunLight.position.set(8,12,6);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.set(2048,2048);
+        sunLight.shadow.camera.near=0.5; sunLight.shadow.camera.far=50;
+        scene.add(sunLight);
+        scene.add(new THREE.DirectionalLight('#c8e8ff', 1.6).translateX(-3).translateY(1).translateZ(-4));
+        scene.add(new THREE.DirectionalLight('#ffe0c8', 2.0).translateY(-0.5).translateZ(4));
+
+        // 粒子背景
+        const particlesGeo = new THREE.BufferGeometry();
+        const particlesPos = new Float32Array(300*3);
+        for(let i=0;i<300;i++){ particlesPos[i*3]=(Math.random()-0.5)*20; particlesPos[i*3+1]=(Math.random()-0.5)*14; particlesPos[i*3+2]=(Math.random()-0.5)*16-2; }
+        particlesGeo.setAttribute('position', new THREE.BufferAttribute(particlesPos,3));
+        const particles = new THREE.Points(particlesGeo, new THREE.PointsMaterial({color:'#d4e8c0',size:0.025,transparent:true,opacity:0.6,blending:THREE.AdditiveBlending,depthWrite:false}));
+        scene.add(particles);
+
+        // ---------- 树叶 ----------
+        const leafGroup = new THREE.Group(); scene.add(leafGroup);
+        function createLeafShape(){
+            const s=new THREE.Shape(); s.moveTo(0,-1.87); s.bezierCurveTo(0.7,-1.21,1.05,-0.22,0.55,0.55);
+            s.bezierCurveTo(0.2,1.1,0.15,1.32,0,1.58); s.bezierCurveTo(-0.15,1.32,-0.2,1.1,-0.55,0.55);
+            s.bezierCurveTo(-1.05,-0.22,-0.7,-1.21,0,-1.87); return s;
+        }
+        const leafGeo = new THREE.ShapeGeometry(createLeafShape(),48);
+        const lPos = leafGeo.attributes.position;
+        for(let i=0;i<lPos.count;i++){ const x=lPos.getX(i),y=lPos.getY(i); lPos.setZ(i, Math.sin(x*1.8)*Math.cos(y*1.2)*0.15+Math.abs(x)*0.08); }
+        leafGeo.computeVertexNormals();
+        const leafMesh = new THREE.Mesh(leafGeo, new THREE.MeshStandardMaterial({color:'#3d7a28',roughness:0.45,side:THREE.DoubleSide}));
+        leafMesh.name='leaf-blade'; leafGroup.add(leafMesh);
+        const midribCurve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(0,1.5,0.06),new THREE.Vector3(0,0,0.1),new THREE.Vector3(0,-1.7,0.05));
+        const midrib = new THREE.Mesh(new THREE.TubeGeometry(midribCurve,40,0.018,8,false), new THREE.MeshStandardMaterial({color:'#5a9a3a',roughness:0.35}));
+        leafGroup.add(midrib);
+        for(let i=0;i<5;i++){ 
+            const y=1.2-i*0.6;
+            const c1=new THREE.QuadraticBezierCurve3(new THREE.Vector3(0,y,0.07),new THREE.Vector3(0.4*(1-i*0.16),y+0.06,0.05),new THREE.Vector3(0.7*(1-i*0.13),y+0.18,0.02));
+            const c2=new THREE.QuadraticBezierCurve3(new THREE.Vector3(0,y,0.07),new THREE.Vector3(-0.4*(1-i*0.16),y+0.06,0.05),new THREE.Vector3(-0.7*(1-i*0.13),y+0.18,0.02));
+            leafGroup.add(new THREE.Mesh(new THREE.TubeGeometry(c1,24,0.006,6,false),midrib.material));
+            leafGroup.add(new THREE.Mesh(new THREE.TubeGeometry(c2,24,0.006,6,false),midrib.material));
+        }
+        leafGroup.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(0,-1.8,0.04),new THREE.Vector3(0,-2.2,-0.02),new THREE.Vector3(0,-2.7,-0.08)]),24,0.04,8,false), new THREE.MeshStandardMaterial({color:'#5d8a3c',roughness:0.5})));
+        const dew = new THREE.Mesh(new THREE.SphereGeometry(0.04,16,16), new THREE.MeshStandardMaterial({color:'#fff',roughness:0.15,emissive:'#fff',emissiveIntensity:0.5,transparent:true,opacity:0.8}));
+        dew.position.set(0,1.55,0.1); leafGroup.add(dew);
+        leafGroup.position.set(0,0.3,0);
+
+        // ---------- 细胞群 ----------
+        const cellGridGroup = new THREE.Group(); cellGridGroup.visible=false; scene.add(cellGridGroup);
+        const cellGridMeshes = [];
+        const gridRows=5, gridCols=6, cellW=1.55, cellH=1.25;
+        const startX = -(gridCols-1)*cellW/2, startY = -(gridRows-1)*cellH/2;
+
+        for(let row=0;row<gridRows;row++){ 
+            for(let col=0;col<gridCols;col++){
+                const idx = row*gridCols+col;
+                const canvas = document.createElement('canvas'); canvas.width=256; canvas.height=200;
+                const ctx=canvas.getContext('2d');
+                const seed=idx*137.5; const rand=(n)=>(Math.sin(seed+n*12.9898)*43758.5453%1+1)%1;
+                ctx.fillStyle='#d4e8c0'; ctx.fillRect(0,0,256,200);
+                ctx.strokeStyle='#7a9a4a'; ctx.lineWidth=7; ctx.strokeRect(4,4,248,192);
+                ctx.strokeStyle='#8faf5a'; ctx.lineWidth=2.5; ctx.strokeRect(12,12,232,176);
+                const vx=128+(rand(1)-0.5)*25, vy=100+(rand(2)-0.5)*20, vr=55+rand(3)*18;
+                const vGrad=ctx.createRadialGradient(vx,vy,vr*0.3,vx,vy,vr);
+                vGrad.addColorStop(0,'rgba(190,225,255,0.85)'); vGrad.addColorStop(0.7,'rgba(160,210,245,0.55)'); vGrad.addColorStop(1,'rgba(140,195,235,0.15)');
+                ctx.fillStyle=vGrad; ctx.beginPath(); ctx.ellipse(vx,vy,vr,vr*0.85,0,0,Math.PI*2); ctx.fill();
+                const nx=vx-vr*0.55+(rand(4)-0.5)*15, ny=vy-vr*0.2+(rand(5)-0.5)*12, nr=18+rand(6)*8;
+                ctx.fillStyle='#7e57c2'; ctx.beginPath(); ctx.arc(nx,ny,nr,0,Math.PI*2); ctx.fill();
+                ctx.fillStyle='#b39ddb'; ctx.beginPath(); ctx.arc(nx+nr*0.2,ny-nr*0.15,nr*0.35,0,Math.PI*2); ctx.fill();
+                for(let c=0;c<8;c++){ 
+                    const cx=30+rand(c*3+10)*196, cy=25+rand(c*3+11)*150, cr=6+rand(c*3+12)*7;
+                    if(Math.hypot(cx-vx,cy-vy)>vr+cr+3){ ctx.fillStyle='rgba(60,150,50,0.8)'; ctx.beginPath(); ctx.ellipse(cx,cy,cr,cr*0.55,rand(c+5)*Math.PI,0,Math.PI*2); ctx.fill(); }
+                }
+                const tex = new THREE.CanvasTexture(canvas); tex.colorSpace=THREE.SRGBColorSpace;
+                const tile = new THREE.Mesh(new THREE.PlaneGeometry(cellW*0.9,cellH*0.9), new THREE.MeshStandardMaterial({map:tex,roughness:0.55,side:THREE.DoubleSide}));
+                tile.position.set(startX+col*cellW, startY+row*cellH, 0);
+                tile.name='cell-tile'; tile.userData={cellIndex:idx}; cellGridGroup.add(tile); cellGridMeshes.push(tile);
+            }
+        }
+        cellGridGroup.position.z=-0.5;
+
+        // ---------- 状态与过渡 ----------
+        let currentState = 'leaf'; // 'leaf' | 'cellGrid'
+        let isTransitioning = false;
+        let transitionData = null;
+
+        function setState(state) {
+            currentState = state;
+            if(state === 'leaf') {
+                hintBar.innerHTML = '<span class="icon">🍃</span> 点击树叶开始探索';
+                cellGridGroup.visible = false;
+                leafGroup.visible = true;
+                activeCamera = perspCamera;
+                perspCamera.position.set(0,0.8,7);
+                perspCamera.lookAt(0,0,0);
+            } else if(state === 'cellGrid') {
+                hintBar.innerHTML = '<span class="icon">🔬</span> 点击任意细胞进入3D模型';
+                cellGridGroup.visible = true;
+                leafGroup.visible = false;
+                activeCamera = orthoCamera;
+                orthoCamera.position.set(0,0,8);
+                orthoCamera.lookAt(0,0,0);
+            }
+        }
+
+        function animateTransition(from, to) {
+            if(isTransitioning) return;
+            isTransitioning = true;
+            transitionData = { from, to, elapsed: 0, duration: 1.2 };
+            setState(to);
+            if(to === 'cellGrid') {
+                leafGroup.visible = true;
+                cellGridGroup.visible = true;
+                leafGroup.scale.set(1,1,1);
+                cellGridGroup.scale.set(0.6,0.6,0.6);
+                cellGridGroup.position.z = 0;
+            }
+        }
+
+        // 点击交互
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        function onClick(event) {
+            if(isTransitioning) return;
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            if(currentState === 'leaf') {
+                raycaster.setFromCamera(mouse, perspCamera);
+                const intersects = raycaster.intersectObjects(leafGroup.children, true);
+                if(intersects.length > 0) {
+                    animateTransition('leaf', 'cellGrid');
+                }
+            } else if(currentState === 'cellGrid') {
+                raycaster.setFromCamera(mouse, orthoCamera);
+                const intersects = raycaster.intersectObjects(cellGridMeshes, false);
+                if(intersects.length > 0) {
+                    // 🔁 点击细胞后跳转到指定URL
+                    window.location.href = 'https://monumental-tartufo-633ac0.netlify.app/';
+                }
+            }
+        }
+
+        window.addEventListener('click', onClick);
+
+        // 动画循环
+        const clock = new THREE.Clock();
+        let time = 0;
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = Math.min(clock.getDelta(), 0.1);
+            time += dt;
+
+            if(isTransitioning && transitionData) {
+                transitionData.elapsed += dt;
+                const t = Math.min(transitionData.elapsed / transitionData.duration, 1);
+                const ease = 1 - Math.pow(1-t, 3);
+                if(transitionData.from === 'leaf' && transitionData.to === 'cellGrid') {
+                    leafGroup.scale.setScalar(1 + ease * 2.5);
+                    leafGroup.position.y = 0.3 - ease * 1.5;
+                    cellGridGroup.scale.setScalar(0.6 + ease * 0.4);
+                    cellGridGroup.position.z = -ease * 0.5;
+                }
+                if(t >= 1) {
+                    isTransitioning = false;
+                    transitionData = null;
+                    if(currentState === 'cellGrid') {
+                        leafGroup.visible = false;
+                        cellGridGroup.scale.set(1,1,1);
+                        cellGridGroup.position.z = -0.5;
+                    }
+                }
+            }
+
+            if(currentState === 'leaf') {
+                leafGroup.rotation.y += dt * 0.4;
+                leafGroup.position.y = 0.3 + Math.sin(time*0.9)*0.2;
+            } else if(currentState === 'cellGrid') {
+                cellGridGroup.position.y = Math.sin(time*0.5)*0.08;
+            }
+
+            particles.rotation.y += dt * 0.03;
+            renderer.render(scene, activeCamera);
+        }
+
+        window.addEventListener('resize', () => {
+            perspCamera.aspect = container.clientWidth/container.clientHeight;
+            perspCamera.updateProjectionMatrix();
+            const w = container.clientWidth/150, h = container.clientHeight/150;
+            orthoCamera.left = -w*6; orthoCamera.right = w*6;
+            orthoCamera.top = h*4.5; orthoCamera.bottom = -h*4.5;
+            orthoCamera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+
+        setState('leaf');
+        animate();
+    </script>
+</body>
+</html>
